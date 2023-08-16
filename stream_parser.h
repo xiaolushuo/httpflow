@@ -18,14 +18,12 @@ private:
     const pcre *url_filter_re;
     const pcre_extra *url_filter_extra;
     const std::string &output_path;
-    const std::string &output_json;
 
     http_parser_settings settings;
 
     std::string method;
     std::string url;
     std::string host;
-    std::string domain;  // 增加域名
 
     long last_ts_usc;
     long ts_usc[HTTP_BOTH];
@@ -47,7 +45,7 @@ private:
     uint32_t fin_nxtseq[HTTP_BOTH];
 
 public:
-    stream_parser(const pcre *url_filter_re, const pcre_extra *url_filter_extra, const std::string &output_path, const std::string &output_json);
+    stream_parser(const pcre *url_filter_re, const pcre_extra *url_filter_extra, const std::string &output_path);
 
     bool parse(const struct packet_info &packet, enum http_parser_type type);
 
