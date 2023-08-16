@@ -182,7 +182,7 @@ std::string datalink2str(int dl_id)
 #endif
 
 	default:
-		sprintf(str, "UNKNOWN(0x%x)(%d)" , dl_id , dl_id);
+		snprintf(str, sizeof(str), "UNKNOWN(0x%x)(%d)", dl_id, dl_id);
 		break;
 
 	}
