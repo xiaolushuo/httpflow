@@ -23,6 +23,7 @@ struct capture_config {
 #define IFNAMSIZ    16
     int snaplen;
     std::string output_path;
+    std::string output_json;
     char device[IFNAMSIZ];
     std::string file_name;
     std::string filter;
@@ -187,7 +188,7 @@ struct ether_header {
     u_short ether_type;
 };
 
-void process_packet(const pcre *url_filter_re, const pcre_extra *url_filter_extra, const std::string &output_path,
+void process_packet(const pcre *url_filter_re, const pcre_extra *url_filter_extra, const std::string &output_path,const std::string &output_json,
                     const u_char *data, size_t len, long ts_usc) {
 
     struct packet_info packet;
@@ -201,7 +202,7 @@ void process_packet(const pcre *url_filter_re, const pcre_extra *url_filter_extr
 
     if (iter == http_requests.end()) {
         if (!packet.body.empty() || (packet.is_syn && packet.ack == 0)) {
-            stream_parser *parser = new stream_parser(url_filter_re, url_filter_extra, output_path);
+            stream_parser *parser = new stream_parser(url_filter_re, url_filter_extra, output_path, output_json);
             if (parser->parse(packet, HTTP_REQUEST)) {
                 parser->set_addr(packet.src_addr, packet.dst_addr);
                 http_requests.insert(std::make_pair(join_addr, parser));
@@ -231,7 +232,7 @@ void pcap_callback(u_char *arg, const struct pcap_pkthdr *header, const u_char *
     size_t len = header->caplen - conf->datalink_size;
     long ts = header->ts.tv_sec * 1000000 + header->ts.tv_usec;
 
-    return process_packet(conf->url_filter_re, conf->url_filter_extra, conf->output_path, content, len, ts);
+    return process_packet(conf->url_filter_re, conf->url_filter_extra, conf->output_path,conf->output_json, content, len, ts);
 }
 
 static const struct option longopts[] = {
@@ -240,10 +241,11 @@ static const struct option longopts[] = {
         {"url-filter",  required_argument, NULL, 'u'},
         {"pcap-file",   required_argument, NULL, 'r'},
         {"output-path", required_argument, NULL, 'w'},
+        {"output-json", required_argument, NULL, 'o'},
         {NULL, 0,                          NULL, 0}
 };
 
-#define SHORTOPTS "hi:u:r:w:"
+#define SHORTOPTS "hi:u:r:w:o:"
 
 int print_usage() {
     std::cerr << "libpcap version " << pcap_lib_version() << "\n"
@@ -257,6 +259,7 @@ int print_usage() {
               << "                    Standard input is used if file is '-'\n"
               << "  -u url-filter     Matches which urls will be dumped\n"
               << "  -w output-path    Write the http request and response to a specific directory\n"
+              << "  -o output-json    Writes http requests and responses to a specific directory in a json file format.\n"
               << "\n"
               << "  expression        Selects which packets will be dumped, The format is the same as tcpdump's 'expression' argument\n"
               << "                    If filter expression is given, only packets for which expression is 'true' will be dumped\n"
@@ -343,6 +346,9 @@ int init_capture_config(int argc, char **argv, capture_config *conf, char *errbu
             case 'w':
                 conf->output_path = optarg;
                 break;
+            case 'o':
+                conf->output_json = optarg;
+                break;
             default:
                 exit(1);
                 break;
@@ -354,10 +360,21 @@ int init_capture_config(int argc, char **argv, capture_config *conf, char *errbu
     }
 
     if (conf->device[0] == 0) {
-        default_device = pcap_lookupdev(errbuf);
+        pcap_if_t *alldevs;
+        if (pcap_findalldevs(&alldevs, errbuf) == -1)
+        {
+            fprintf(stderr,"Error in pcap_findalldevs: %s\n", errbuf);
+            exit(1);
+        }
+
+        // Use the first device from the list
+        default_device = alldevs->name;
         if (default_device) {
             std::strncpy(conf->device, default_device, sizeof(conf->device));
         }
+
+        // Don't forget to free the device list when you're done with it
+        pcap_freealldevs(alldevs);
     }
 
     if (!conf->output_path.empty()) {
