@@ -1,0 +1,12 @@
+{
+    "raw_request": "POST /messages/badge HTTP/1.1\r\nHost: 43.143.147.130:7788\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36\r\nContent-Length: 44\r\nAccept: application/json, text/plain, */*\r\nAccept-Encoding: gzip, deflate\r\nAccept-Language: zh-CN,zh;q=0.9\r\nContent-Type: multipart/form-data; boundary=----WebKitFormBoundaryRAzNtNEA7I0iASwd\r\nCookie: edgesid=7s6YnkWytezVNzKoVRpNJm22hJQUw3Nv\r\nOrigin: http://43.143.147.130:7788\r\nReferer: http://43.143.147.130:7788/servers/create\r\nX-Requested-With: XMLHttpRequest\r\n\r\n------WebKitFormBoundaryRAzNtNEA7I0iASwd--\r\n",
+    "raw_response": "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'\r\nContent-Type: application/json; charset=utf-8\r\nX-Frame-Options: SAMEORIGIN\r\nDate: Wed, 16 Aug 2023 07:58:04 GMT\r\nContent-Length: 64\r\n\r\n{\"code\":200,\"data\":{\"count\":0,\"teaMenu\":\"message\"},\"message\":\"\"}",
+    "request_domain": "43.143.147.130:7788",
+    "request_header": "Host: 43.143.147.130:7788\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36\r\nContent-Length: 44\r\nAccept: application/json, text/plain, */*\r\nAccept-Encoding: gzip, deflate\r\nAccept-Language: zh-CN,zh;q=0.9\r\nContent-Type: multipart/form-data; boundary=----WebKitFormBoundaryRAzNtNEA7I0iASwd\r\nCookie: edgesid=7s6YnkWytezVNzKoVRpNJm22hJQUw3Nv\r\nOrigin: http://43.143.147.130:7788\r\nReferer: http://43.143.147.130:7788/servers/create\r\nX-Requested-With: XMLHttpRequest\r\n\r\n",
+    "request_method": "POST",
+    "request_postdata": "------WebKitFormBoundaryRAzNtNEA7I0iASwd--\r\n",
+    "request_url": "/messages/badge",
+    "response_body": "{\"code\":200,\"data\":{\"count\":0,\"teaMenu\":\"message\"},\"message\":\"\"}",
+    "response_header": "Content-Security-Policy: default-src 'self' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'\r\nContent-Type: application/json; charset=utf-8\r\nX-Frame-Options: SAMEORIGIN\r\nDate: Wed, 16 Aug 2023 07:58:04 GMT\r\nContent-Length: 64\r\n\r\n",
+    "response_status_code": "200"
+}
