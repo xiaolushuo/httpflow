@@ -22,6 +22,10 @@ apt-get install libboost-all-dev libicu-dev libpcap-dev zlib1g-dev libpcre3-dev
 ## On MacOs
 brew update
 brew install boost icu4c libpcap zlib pcre
+
+## install nlohmann_json
+cd external
+git clone https://ghproxy.com/https://github.com/nlohmann/json.git nlohmann_json 
 ```
 
 - Building httpflow
