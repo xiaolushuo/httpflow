@@ -6,15 +6,19 @@
 
 ### Linux
 
-- Install [zlib](http://www.zlib.net/), [pcap](http://www.tcpdump.org/), [pcre](http://pcre.org/),[icu](https://github.com/unicode-org/icu),[nlohmann_json](https://github.com/nlohmann/json),[boost](https://www.boost.org/)
+- Install [zlib](http://www.zlib.net/),  [pcap](http://www.tcpdump.org/),  [pcre](http://pcre.org/), [icu](https://github.com/unicode-org/icu), [nlohmann_json](https://github.com/nlohmann/json), [boost](https://www.boost.org/)
 
 ```bash
 ## On CentOS
 yum update
 yum install boost-devel libicu-devel libpcap-devel zlib-devel pcre-devel
+
+
 ## On Ubuntu / Debian
 apt-get update
 apt-get install libboost-all-dev libicu-dev libpcap-dev zlib1g-dev libpcre3-dev 
+
+
 ## On MacOs
 brew update
 brew install boost icu4c libpcap zlib pcre
