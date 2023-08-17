@@ -1,13 +1,47 @@
 #include "stream_parser.h"
 #include "util.h"
+#include <nlohmann/json.hpp>
+#include <unicode/ucnv.h>
+#include <boost/filesystem.hpp>
+
+bool is_valid_utf8(const std::string& string) {
+    int bytes_in_sequence = 0;
+
+    for (unsigned char c : string) {
+        if (bytes_in_sequence == 0) {
+            if ((c >> 7) == 0) {
+                // ASCII character
+                continue;
+            } else if ((c >> 5) == 0b110) {
+                bytes_in_sequence = 1;
+            } else if ((c >> 4) == 0b1110) {
+                bytes_in_sequence = 2;
+            } else if ((c >> 3) == 0b11110) {
+                bytes_in_sequence = 3;
+            } else {
+                // Invalid first byte of a sequence
+                return false;
+            }
+        } else {
+            if ((c >> 6) != 0b10) {
+                // Invalid byte in a sequence
+                return false;
+            }
+            bytes_in_sequence--;
+        }
+    }
+
+    return bytes_in_sequence == 0;
+}
 
 stream_parser::stream_parser(const pcre *url_filter_re, const pcre_extra *url_filter_extra,
-                             const std::string &output_path) :
-        url_filter_re(url_filter_re),
-        url_filter_extra(url_filter_extra),
-        output_path(output_path),
-        gzip_flag(false),
-        dump_flag(-1) {
+                             const std::string &output_path, const std::string &output_json)
+    : url_filter_re(url_filter_re),
+      url_filter_extra(url_filter_extra),
+      output_path(output_path),
+      output_json(output_json),
+      gzip_flag(false),
+      dump_flag(-1) {
     std::memset(&next_seq, 0, sizeof next_seq);
     std::memset(&ts_usc, 0, sizeof ts_usc);
     std::memset(&fin_nxtseq, 0, sizeof fin_nxtseq);
@@ -114,6 +148,7 @@ int stream_parser::on_header_value(http_parser *parser, const char *at, size_t l
     } else {
         if (self->temp_header_field == "host") {
             self->host.assign(at, length);
+            self->domain.assign(at, length);
         }
     }
     // std::cout << self->temp_header_field <<  ":" << std::string(at, length) << std::endl;
@@ -124,6 +159,11 @@ int stream_parser::on_headers_complete(http_parser *parser) {
     if (parser->type == HTTP_REQUEST || parser->type == HTTP_RESPONSE) {
         stream_parser *self = reinterpret_cast<stream_parser *>(parser->data);
         self->header[parser->type] = self->raw[parser->type].substr(0, parser->nread);
+        // Remove the request line from the header
+        size_t header_start = self->header[parser->type].find("\r\n");
+        if (header_start != std::string::npos) {
+            self->header[parser->type] = self->header[parser->type].substr(header_start + 2);
+        }
         if (parser->type == HTTP_RESPONSE) {
             self->ts_usc[parser->type] = self->last_ts_usc;
         }
@@ -167,6 +207,46 @@ bool stream_parser::match_url(const std::string &url) {
     return rc >= 0;
 }
 
+std::string to_utf8(const std::string& input) {
+    UErrorCode error = U_ZERO_ERROR;
+    UConverter* conv = ucnv_open("UTF-8", &error);
+    if (U_FAILURE(error)) {
+        throw std::runtime_error("Failed to open UTF-8 converter");
+    }
+
+    int32_t size = ucnv_toUChars(conv, nullptr, 0, input.c_str(), input.size(), &error);
+    if (error != U_BUFFER_OVERFLOW_ERROR) {
+        ucnv_close(conv);
+        throw std::runtime_error("Failed to calculate UTF-16 string size");
+    }
+
+    std::u16string u16str(size, '\0');
+    error = U_ZERO_ERROR;
+    ucnv_toUChars(conv, reinterpret_cast<UChar*>(&u16str[0]), size, input.c_str(), input.size(), &error);
+    if (U_FAILURE(error)) {
+        ucnv_close(conv);
+        throw std::runtime_error("Failed to convert string to UTF-16");
+    }
+
+    size = ucnv_fromUChars(conv, nullptr, 0, reinterpret_cast<const UChar*>(u16str.c_str()), u16str.size(), &error);
+    if (error != U_BUFFER_OVERFLOW_ERROR) {
+        ucnv_close(conv);
+        throw std::runtime_error("Failed to calculate UTF-8 string size");
+    }
+
+    std::string output(size, '\0');
+    error = U_ZERO_ERROR;
+    ucnv_fromUChars(conv, &output[0], size, reinterpret_cast<const UChar*>(u16str.c_str()), u16str.size(), &error);
+    if (U_FAILURE(error)) {
+        ucnv_close(conv);
+        throw std::runtime_error("Failed to convert string to UTF-8");
+    }
+
+    ucnv_close(conv);
+    return output;
+}
+
+
 void stream_parser::dump_http_request() {
     if (dump_flag != 0) return;
 
@@ -197,7 +277,93 @@ void stream_parser::dump_http_request() {
         std::cout << buff;
     }
 
-    if (!output_path.empty()) {
+    if (!output_json.empty()) {
+        static size_t req_idx = 0;
+        std::snprintf(buff, 128, "/%p.%lu.json", this, ++req_idx);
+        std::string save_filename = output_json;
+        save_filename.append(buff);
+        // Extract directory from save_filename
+        boost::filesystem::path dir = boost::filesystem::path(save_filename).parent_path();
+    if (!boost::filesystem::exists(dir)) {
+        boost::filesystem::create_directories(dir);
+    }
+        std::cout << " saved at " << save_filename << std::endl;
+        std::ofstream out(save_filename.c_str(), std::ios::app | std::ios::out);
+        if (out.is_open()) {
+            // 创建一个 map 来存储 JSON 键值对
+            std::unordered_map<std::string, std::string> json_map;
+
+            // ...
+
+            if (is_valid_utf8(method)) {
+                json_map["request_method"] = method;
+            } else {
+                json_map["request_method"] = to_utf8(method);
+            }
+
+            if (is_valid_utf8(url)) {
+                json_map["request_url"] = url;
+            } else {
+                json_map["request_url"] = to_utf8(url);
+            }
+
+            if (is_valid_utf8(header[HTTP_REQUEST])) {
+                json_map["request_header"] = header[HTTP_REQUEST];
+            } else {
+                json_map["request_header"] = to_utf8(header[HTTP_REQUEST]);
+            }
+
+            if (is_valid_utf8(body[HTTP_REQUEST])) {
+                json_map["request_postdata"] = body[HTTP_REQUEST];
+            } else {
+                json_map["request_postdata"] = to_utf8(body[HTTP_REQUEST]);
+            }
+
+            if (is_valid_utf8(domain)) {
+                json_map["request_domain"] = domain;
+            } else {
+                json_map["request_domain"] = to_utf8(domain);
+            }
+
+            if (is_valid_utf8(raw[HTTP_REQUEST])) {
+                json_map["raw_request"] = raw[HTTP_REQUEST];
+            } else {
+                json_map["raw_request"] = to_utf8(raw[HTTP_REQUEST]);
+            }
+
+            json_map["response_status_code"] = std::to_string(parser[HTTP_RESPONSE].status_code);
+
+            if (is_valid_utf8(header[HTTP_RESPONSE])) {
+                json_map["response_header"] = header[HTTP_RESPONSE];
+            } else {
+                json_map["response_header"] = to_utf8(header[HTTP_RESPONSE]);
+            }
+
+            if (is_valid_utf8(body[HTTP_RESPONSE])) {
+                json_map["response_body"] = body[HTTP_RESPONSE];
+            } else {
+                json_map["response_body"] = to_utf8(body[HTTP_RESPONSE]);
+            }
+
+            if (is_valid_utf8(raw[HTTP_RESPONSE])) {
+                json_map["raw_response"] = raw[HTTP_RESPONSE];
+            } else {
+                json_map["raw_response"] = to_utf8(raw[HTTP_RESPONSE]);
+            }
+
+// ...
+
+            // 将 map 转换为 JSON 格式的字符串
+            std::string json_str = nlohmann::json(json_map).dump();
+
+            out << json_str << std::endl;
+            out.close();
+        } else {
+            std::cerr << "ofstream [" << save_filename << "] is not opened." << std::endl;
+            out.close();
+            exit(1);
+        }
+    } else if (!output_path.empty()) {
         static size_t req_idx = 0;
         std::snprintf(buff, 128, "/%p.%lu", this, ++req_idx);
         std::string save_filename = output_path;
@@ -277,6 +443,7 @@ std::ofstream &operator<<(std::ofstream &out, const stream_parser &parser) {
         << parser.header_100_continue
         << parser.body_100_continue
         << parser.body[HTTP_REQUEST]
+        << "\r\n\r\n"
         << parser.header[HTTP_RESPONSE]
         << parser.body[HTTP_RESPONSE];
     return out;

@@ -15,7 +15,7 @@
 #include "stream_parser.h"
 #include "data_link.h"
 
-#define HTTPFLOW_VERSION "0.0.9"
+#define HTTPFLOW_VERSION "0.1.0"
 
 #define MAXIMUM_SNAPLEN 262144
 
