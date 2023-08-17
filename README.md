@@ -25,7 +25,7 @@ brew install boost icu4c libpcap zlib pcre
 
 ## install nlohmann_json
 cd external
-git clone https://ghproxy.com/https://github.com/nlohmann/json.git nlohmann_json 
+git clone https://github.com/nlohmann/json.git nlohmann_json 
 ```
 
 - Building httpflow
