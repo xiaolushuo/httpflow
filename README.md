@@ -4,7 +4,7 @@
 
 [![asciicast](https://asciinema.org/a/scdzwLDNytSPHtpbu1ECSv5FV.svg)](https://asciinema.org/a/scdzwLDNytSPHtpbu1ECSv5FV)
 
-### Linux
+### Requires installation
 
 - Install [zlib](http://www.zlib.net/),  [pcap](http://www.tcpdump.org/),  [pcre](http://pcre.org/), [icu](https://github.com/unicode-org/icu), [nlohmann_json](https://github.com/nlohmann/json), [boost](https://www.boost.org/)
 
