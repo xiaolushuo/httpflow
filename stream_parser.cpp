@@ -3,6 +3,23 @@
 #include <nlohmann/json.hpp>
 #include <unicode/ucnv.h>
 #include <boost/filesystem.hpp>
+#include <cpprest/http_client.h>
+#include <cpprest/json.h>
+#include <unordered_map>
+#include <string>
+#include <iostream>
+#include <cpprest/http_client.h>
+#include <yaml-cpp/yaml.h>
+#include <hiredis/hiredis.h>
+#include <boost/regex.hpp>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+
+using namespace web;
+using namespace web::http;
+using namespace web::http::client;
+
 
 bool is_valid_utf8(const std::string& string) {
     int bytes_in_sequence = 0;
@@ -34,12 +51,37 @@ bool is_valid_utf8(const std::string& string) {
     return bytes_in_sequence == 0;
 }
 
-stream_parser::stream_parser(const pcre *url_filter_re, const pcre_extra *url_filter_extra,
-                             const std::string &output_path, const std::string &output_json)
+std::string getCurrentTimestamp() {
+    // 获取当前的系统时间
+    auto now = std::chrono::system_clock::now();
+    // 将时间转换为time_t以便我们可以使用strftime
+    std::time_t now_time_t = std::chrono::system_clock::to_time_t(now);
+    // 创建一个tm结构体
+    std::tm now_tm = *std::gmtime(&now_time_t);
+    // 创建一个char数组来保存日期字符串
+    char date_str[20];
+    // 使用strftime来将时间转换为ISO 8601格式
+    strftime(date_str, sizeof(date_str), "%FT%TZ", &now_tm);
+    // 返回日期字符串
+    return std::string(date_str);
+}
+
+bool isStaticResource(const std::string &url) {
+    // 定义判断静态资源URL的正则表达式
+    boost::regex staticResourceRegex("\\.(css|js|jpg|jpeg|png|gif|bmp|svg|ico|woff|woff2|ttf|eot|map)(\\?|$)");
+
+    return boost::regex_search(url, staticResourceRegex);
+}
+
+stream_parser::stream_parser(const pcre *url_filter_re, const pcre_extra *url_filter_extra,const pcre *domain_filter_re, const pcre_extra *domain_filter_extra,
+                             const std::string &output_path, const std::string &output_json,const std::string &yaml_file)
     : url_filter_re(url_filter_re),
       url_filter_extra(url_filter_extra),
+      domain_filter_re(domain_filter_re),
+      domain_filter_extra(domain_filter_extra),
       output_path(output_path),
       output_json(output_json),
+      yaml_file(yaml_file),
       gzip_flag(false),
       dump_flag(-1) {
     std::memset(&next_seq, 0, sizeof next_seq);
@@ -61,9 +103,11 @@ stream_parser::stream_parser(const pcre *url_filter_re, const pcre_extra *url_fi
 }
 
 bool stream_parser::parse(const struct packet_info &packet, enum http_parser_type type) {
+    stream_parser *self = reinterpret_cast<stream_parser *>(parser->data);
     std::string *str = NULL;
     size_t orig_size = raw[type].size();
     str = &raw[type];
+    
     if (next_seq[type] != 0 && packet.seq != next_seq[type]) {
         if (packet.seq < next_seq[type]) {
             // retransmission packet
@@ -93,8 +137,8 @@ bool stream_parser::parse(const struct packet_info &packet, enum http_parser_typ
     bool ret = true;
     if (str->size() > orig_size) {
         last_ts_usc = packet.ts_usc;
-        size_t parse_bytes = http_parser_execute(&parser[type], &settings, str->c_str() + orig_size,
-                                                 str->size() - orig_size);
+        size_t parse_bytes = http_parser_execute(&parser[type], &settings, str->c_str() + orig_size, str->size() - orig_size);
+
         ret = parse_bytes > 0 && HTTP_PARSER_ERRNO(&parser[type]) == HPE_OK;
     }
     if (packet.is_rst || is_stream_fin(packet, type)) {
@@ -105,8 +149,10 @@ bool stream_parser::parse(const struct packet_info &packet, enum http_parser_typ
 }
 
 void stream_parser::set_addr(const std::string &req_addr, const std::string &resp_addr) {
+
     this->address[HTTP_REQUEST].assign(req_addr);
     this->address[HTTP_RESPONSE].assign(resp_addr);
+
 }
 
 int stream_parser::on_message_begin(http_parser *parser) {
@@ -122,7 +168,13 @@ int stream_parser::on_url(http_parser *parser, const char *at, size_t length) {
     stream_parser *self = reinterpret_cast<stream_parser *>(parser->data);
     self->url.assign(at, length);
     self->method.assign(http_method_str(static_cast<enum http_method>(parser->method)));
+    // std::cerr << "\n获取到的url:" << self->url << "\n"<< std::endl;
     if (!self->match_url(self->url)) {
+        return -1;
+    }
+    // 打印 self->url 的值到标准错误流
+    // std::cerr << "URL: " << self->url << std::endl;
+    if (isStaticResource(self->url)){
         return -1;
     }
     return 0;
@@ -139,16 +191,19 @@ int stream_parser::on_header_field(http_parser *parser, const char *at, size_t l
     return 0;
 }
 
+
 int stream_parser::on_header_value(http_parser *parser, const char *at, size_t length) {
     stream_parser *self = reinterpret_cast<stream_parser *>(parser->data);
+    if (self->temp_header_field == "host") {
+        self->host.assign(at, length);
+        self->domain.assign(at, length);
+    }
+    if (!self->match_domain(self->domain) && !self->match_domain(self->address[HTTP_RESPONSE])) {
+        return -1;
+    }
     if (parser->type == HTTP_RESPONSE) {
         if (self->temp_header_field == "content-encoding" && std::strstr(at, "gzip")) {
             self->gzip_flag = true;
-        }
-    } else {
-        if (self->temp_header_field == "host") {
-            self->host.assign(at, length);
-            self->domain.assign(at, length);
         }
     }
     // std::cout << self->temp_header_field <<  ":" << std::string(at, length) << std::endl;
@@ -207,6 +262,14 @@ bool stream_parser::match_url(const std::string &url) {
     return rc >= 0;
 }
 
+bool stream_parser::match_domain(const std::string &domain) {
+    if (!domain_filter_re) return true;
+    int ovector[30];
+    int rc = pcre_exec(domain_filter_re, domain_filter_extra, domain.c_str(), domain.size(), 0, 0, ovector, 30);
+    // 打印 pcre_exec 的返回值和 domain 的值
+    return rc >= 0;
+}
+
 std::string to_utf8(const std::string& input) {
     UErrorCode error = U_ZERO_ERROR;
     UConverter* conv = ucnv_open("UTF-8", &error);
@@ -249,7 +312,12 @@ std::string to_utf8(const std::string& input) {
 
 void stream_parser::dump_http_request() {
     if (dump_flag != 0) return;
-
+    if (!match_domain(domain)){
+        return;
+    }
+    if (isStaticResource(url)) {
+        return;
+    }
     if (gzip_flag && !body[HTTP_RESPONSE].empty()) {
         std::string new_body;
         if (gzip_decompress(body[HTTP_RESPONSE], new_body)) {
@@ -276,7 +344,6 @@ void stream_parser::dump_http_request() {
         }
         std::cout << buff;
     }
-
     if (!output_json.empty()) {
         static size_t req_idx = 0;
         std::snprintf(buff, 128, "/%p.%lu.json", this, ++req_idx);
@@ -287,14 +354,18 @@ void stream_parser::dump_http_request() {
     if (!boost::filesystem::exists(dir)) {
         boost::filesystem::create_directories(dir);
     }
+    // 添加调试语句
+    // std::cout << "Debug: Reached the block for saving JSON.1" << std::endl;
         std::cout << " saved at " << save_filename << std::endl;
+        // 添加调试语句
+    // std::cout << "Debug: Reached the block for saving JSON.2" << std::endl;
         std::ofstream out(save_filename.c_str(), std::ios::app | std::ios::out);
         if (out.is_open()) {
             // 创建一个 map 来存储 JSON 键值对
             std::unordered_map<std::string, std::string> json_map;
 
             // ...
-
+            json_map["timestamp"] = getCurrentTimestamp();
             if (is_valid_utf8(method)) {
                 json_map["request_method"] = method;
             } else {
@@ -350,6 +421,15 @@ void stream_parser::dump_http_request() {
             } else {
                 json_map["raw_response"] = to_utf8(raw[HTTP_RESPONSE]);
             }
+            // 分割源IP和端口
+            std::size_t split_pos = address[HTTP_REQUEST].find(':');
+            json_map["source_ip"] = address[HTTP_REQUEST].substr(0, split_pos);
+            json_map["source_port"] = address[HTTP_REQUEST].substr(split_pos + 1);
+
+            // 分割目标IP和端口
+            split_pos = address[HTTP_RESPONSE].find(':');
+            json_map["destination_ip"] = address[HTTP_RESPONSE].substr(0, split_pos);
+            json_map["destination_port"] = address[HTTP_RESPONSE].substr(split_pos + 1);
 
 // ...
 
@@ -378,7 +458,90 @@ void stream_parser::dump_http_request() {
             out.close();
             exit(1);
         }
-    } else {
+    } else if (!yaml_file.empty()) {
+        std::cout << ANSI_COLOR_CYAN << "\nzhun bei zhuan json" << "\n";
+        // 创建一个 map 来存储 JSON 键值对
+        std::unordered_map<std::string, std::string> json_map;
+        json_map["timestamp"] = getCurrentTimestamp();
+        if (is_valid_utf8(method)) {
+            json_map["request_method"] = method;
+        } else {
+            json_map["request_method"] = to_utf8(method);
+        }
+
+        if (is_valid_utf8(url)) {
+            json_map["request_url"] = url;
+        } else {
+            json_map["request_url"] = to_utf8(url);
+        }
+
+        if (is_valid_utf8(header[HTTP_REQUEST])) {
+            json_map["request_header"] = header[HTTP_REQUEST];
+        } else {
+            json_map["request_header"] = to_utf8(header[HTTP_REQUEST]);
+        }
+
+        if (is_valid_utf8(body[HTTP_REQUEST])) {
+            json_map["request_postdata"] = body[HTTP_REQUEST];
+        } else {
+            json_map["request_postdata"] = to_utf8(body[HTTP_REQUEST]);
+        }
+
+        if (is_valid_utf8(domain)) {
+            json_map["request_domain"] = domain;
+        } else {
+            json_map["request_domain"] = to_utf8(domain);
+        }
+
+        if (is_valid_utf8(raw[HTTP_REQUEST])) {
+            json_map["raw_request"] = raw[HTTP_REQUEST];
+        } else {
+            json_map["raw_request"] = to_utf8(raw[HTTP_REQUEST]);
+        }
+
+        json_map["response_status_code"] = std::to_string(parser[HTTP_RESPONSE].status_code);
+
+        if (is_valid_utf8(header[HTTP_RESPONSE])) {
+            json_map["response_header"] = header[HTTP_RESPONSE];
+        } else {
+            json_map["response_header"] = to_utf8(header[HTTP_RESPONSE]);
+        }
+
+        if (is_valid_utf8(body[HTTP_RESPONSE])) {
+            json_map["response_body"] = body[HTTP_RESPONSE];
+        } else {
+            json_map["response_body"] = to_utf8(body[HTTP_RESPONSE]);
+        }
+
+        if (is_valid_utf8(raw[HTTP_RESPONSE])) {
+            json_map["raw_response"] = raw[HTTP_RESPONSE];
+        } else {
+            json_map["raw_response"] = to_utf8(raw[HTTP_RESPONSE]);
+        }
+
+        // 分割源IP和端口
+        std::size_t split_pos = address[HTTP_REQUEST].find(':');
+        json_map["source_ip"] = address[HTTP_REQUEST].substr(0, split_pos);
+        json_map["source_port"] = address[HTTP_REQUEST].substr(split_pos + 1);
+
+        // 分割目标IP和端口
+        split_pos = address[HTTP_RESPONSE].find(':');
+        json_map["destination_ip"] = address[HTTP_RESPONSE].substr(0, split_pos);
+        json_map["destination_port"] = address[HTTP_RESPONSE].substr(split_pos + 1);
+        // 将 map 转换为 JSON 格式的字符串
+        std::string json_str = nlohmann::json(json_map).dump();
+        // 将 json_str 推入 es_queue_
+        try {
+            es_queue.push(json_str);
+            std::cout << "Pushed JSON string to the queue successfully." << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to push JSON string to the queue: " << e.what() << std::endl;
+        }
+        // 将 json_str 推入 redis_queue_
+        redis_queue.push(json_str);
+} 
+    
+    else {
         std::cout << std::endl << *this << std::endl;
     }
     // clear
