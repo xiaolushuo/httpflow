@@ -90,11 +90,12 @@ void monitor_queue() {
     redisContext *c = redisConnect(global_redis_config.redis_ip.c_str(), global_redis_config.redis_port);
     if (c == NULL || c->err) {
         if (c) {
-            printf("Error: %s\n", c->errstr);
+            printf("Redis Error: %s\n", c->errstr);
             // handle error
         } else {
             printf("Can't allocate redis context\n");
         }
+        return;
     }
 
     // 如果用户名存在，设置认证
@@ -307,12 +308,11 @@ void process_packet(const pcre *url_filter_re, const pcre_extra *url_filter_extr
     bool ret = process_ipv4(&packet, data, len);
     
     if (!ret) return;
-
+    // 打印源 IP 地址和目标 IP 地址
     std::string join_addr;
     get_join_addr(packet.src_addr, packet.dst_addr, join_addr);
     std::map<std::string, stream_parser *>::iterator iter = http_requests.find(join_addr);
     if (iter == http_requests.end()) {
-
         if (!packet.body.empty() || (packet.is_syn && packet.ack == 0)) {
             // stream_parser *parser = new stream_parser(url_filter_re, url_filter_extra, output_path, output_json,yaml_file);
             stream_parser *parser = new stream_parser(url_filter_re, url_filter_extra,domain_filter_re, domain_filter_extra, output_path, output_json,yaml_file);
@@ -344,7 +344,9 @@ void pcap_callback(u_char *arg, const struct pcap_pkthdr *header, const u_char *
     int ethernet_header_length = sizeof(struct ether_header);
     // 检查以太类型字段
     u_short ether_type = ntohs(eth_header->ether_type);
+    // std::cout << "Ether type: " << std::hex << ether_type << std::endl;  // 打印以太类型字段的值
     if (ether_type == ETHERTYPE_VLAN) {
+        // std::cout << "ETHERTYPE_VLAN"  << std::endl;
         ethernet_header_length += 4;  // VLAN 标签的长度是 4 字节
         // 更新以太类型字段的值
         ether_type = ntohs(*reinterpret_cast<const u_short *>(content + ethernet_header_length - 2));
@@ -357,8 +359,22 @@ void pcap_callback(u_char *arg, const struct pcap_pkthdr *header, const u_char *
     }
     content += ethernet_header_length;
     size_t len = header->caplen - ethernet_header_length;
-    long ts = header->ts.tv_sec * 1000000 + header->ts.tv_usec;
+    //  // 解析 IP 头部信息
+    // const struct ip *ip_header = reinterpret_cast<const struct ip *>(content);
+    // char src_ip[INET_ADDRSTRLEN];
+    // char dst_ip[INET_ADDRSTRLEN];
+    // inet_ntop(AF_INET, &(ip_header->ip_src), src_ip, INET_ADDRSTRLEN);
+    // inet_ntop(AF_INET, &(ip_header->ip_dst), dst_ip, INET_ADDRSTRLEN);
 
+    // // 打印源 IP 地址和目标 IP 地址
+    // std::cout << "Source IP: " << src_ip << ", Destination IP: " << dst_ip << std::endl;
+    // 当目标 IP 地址等于 "43.143.147.130" 时，打印一条特殊的消息
+
+    long ts = header->ts.tv_sec * 1000000 + header->ts.tv_usec;
+    // 在调用 process_packet 函数前打印 ether_type 的值
+    // 以太类型（Ether type）值为 800，这是一个十六进制数，对应的十进制数为 2048。
+    // 在以太网协议中，以太类型值 2048 对应的是 IPv4 数据包。这意味着捕获的数据包是 IPv4 数据包
+    // std::cout << "Ether type: " << std::hex << ether_type << std::endl;
     process_packet(conf->url_filter_re, conf->url_filter_extra, conf->domain_filter_re, conf->domain_filter_extra,conf->output_path, conf->output_json,conf->yaml_file, content, len, ts);
 
 }
@@ -625,10 +641,11 @@ int main(int argc, char **argv) {
     // 启动多个线程来监控队列
     const int num_threads = cap_conf->threads;
     std::vector<std::thread> threads;
-    
-    for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back(monitor_queue);
-    }
+    if (!cap_conf->yaml_file.empty()) {
+        for (int i = 0; i < num_threads; ++i) {
+            threads.emplace_back(monitor_queue);
+        }
+}
 
     if (!cap_conf->file_name.empty()) {
         handle = pcap_open_offline(cap_conf->file_name.c_str(), errbuf);
@@ -701,12 +718,13 @@ int main(int argc, char **argv) {
     delete cap_conf;
 
     pcap_close(handle);
+    if (!cap_conf->yaml_file.empty()) {
     // 在程序结束前，设置终止信号，然后等待监听线程完成
     terminate_threads = true;
-    // monitor_thread.join();
     // 主线程等待所有线程完成
     for (int i = 0; i < num_threads; ++i) {
         threads[i].join();
+    }
     }
     return 0;
 }

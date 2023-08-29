@@ -107,7 +107,7 @@ bool stream_parser::parse(const struct packet_info &packet, enum http_parser_typ
     std::string *str = NULL;
     size_t orig_size = raw[type].size();
     str = &raw[type];
-    
+    // 打印 packet.seq 和 next_seq[type] 的值
     if (next_seq[type] != 0 && packet.seq != next_seq[type]) {
         if (packet.seq < next_seq[type]) {
             // retransmission packet
@@ -132,13 +132,12 @@ bool stream_parser::parse(const struct packet_info &packet, enum http_parser_typ
         str->append(iterator->second.first);
         next_seq[type] = iterator->second.second;
         out_of_order_packet[type].erase(iterator);
-    }
+}
 
     bool ret = true;
     if (str->size() > orig_size) {
         last_ts_usc = packet.ts_usc;
         size_t parse_bytes = http_parser_execute(&parser[type], &settings, str->c_str() + orig_size, str->size() - orig_size);
-
         ret = parse_bytes > 0 && HTTP_PARSER_ERRNO(&parser[type]) == HPE_OK;
     }
     if (packet.is_rst || is_stream_fin(packet, type)) {
@@ -267,6 +266,7 @@ bool stream_parser::match_domain(const std::string &domain) {
     int ovector[30];
     int rc = pcre_exec(domain_filter_re, domain_filter_extra, domain.c_str(), domain.size(), 0, 0, ovector, 30);
     // 打印 pcre_exec 的返回值和 domain 的值
+    // std::cout << "rc: " << rc << ", domain: " << domain << std::endl;
     return rc >= 0;
 }
 
@@ -316,6 +316,22 @@ void stream_parser::dump_http_request() {
         return;
     }
     if (isStaticResource(url)) {
+        return;
+    }
+    // 这里主要是避免将xray重发的流量再次存储
+    // Convert header[HTTP_REQUEST] to lowercase and check for "sec_scan"
+    std::string header_lower = header[HTTP_REQUEST];
+    std::transform(header_lower.begin(), header_lower.end(), header_lower.begin(), ::tolower);
+    boost::regex sec_scan_regex("\\bsec_scan\\b");  // 使用 boost::regex
+    if (boost::regex_search(header_lower, sec_scan_regex)) {
+        // std::cout << "Matched header: " << header[HTTP_REQUEST] << std::endl;  // 打印匹配到的请求头
+        return;
+    }
+    // Convert raw[HTTP_REQUEST] to lowercase and check for "sec_scan"
+    std::string raw_lower = raw[HTTP_REQUEST];
+    std::transform(raw_lower.begin(), raw_lower.end(), raw_lower.begin(), ::tolower);
+    if (boost::regex_search(raw_lower, sec_scan_regex)) {
+        // std::cout << "Matched raw request: " << raw[HTTP_REQUEST] << std::endl;  // 打印匹配到的原始请求
         return;
     }
     if (gzip_flag && !body[HTTP_RESPONSE].empty()) {
