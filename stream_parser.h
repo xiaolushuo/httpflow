@@ -122,6 +122,11 @@ public:
     static int on_body(http_parser *parser, const char *at, size_t length);
 
     static int on_message_complete(http_parser *parser);
+
+    std::unordered_map<std::string, std::string> create_json_map();
+
+    // body 在 raw[HTTP_RESPONSE] 中的开始位置和长度
+    size_t body_start;
 };
 
 std::ostream &operator<<(std::ostream &out, const stream_parser &parser);
