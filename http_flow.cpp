@@ -30,8 +30,7 @@
 
 #define ETHERTYPE_MPLS_UNICAST 0x8847  // MPLS Unicast 的类型值
 #define ETHERTYPE_MPLS_MULTICAST 0x8848  // MPLS Multicast 的类型值
-// 在这里定义你想要的缓冲区大小，单位是字节
-#define BUFFER_SIZE 10485760  // 10MB
+
 // 定义全局队列
 ThreadSafeQueue<std::string> es_queue;
 ThreadSafeQueue<std::string> redis_queue;
@@ -141,13 +140,22 @@ void monitor_queue() {
 
                 // Set the request body
                 request.set_body(json_string, "application/json");
-
+                // Print the request
+                // std::cout << "Method: " << request.method() << std::endl;
+                // std::cout << "URI: " << request.request_uri().to_string() << std::endl;
+                // std::cout << "Headers: " << std::endl;
+                // for (const auto& header : request.headers()) {
+                //     std::cout << "  " << header.first << ": " << header.second << std::endl;
+                // }
+                // std::cout << "Body: " << json_string << std::endl;
                 // 发送请求并处理响应
                 client.request(request).then([](http_response response) {
                     if (response.status_code() == status_codes::Created) {
                         std::cout << ANSI_COLOR_GREEN << "Data successfully written to Elasticsearch." << ANSI_COLOR_RESET <<  std::endl;
                     } else {
                         std::cout << ANSI_COLOR_RED << "Failed to write data to Elasticsearch. Status code: " << response.status_code() << ANSI_COLOR_RESET << std::endl;
+                        auto error_message = response.extract_string().get();
+                        std::cout << "Error message: " << error_message << std::endl;
                     }
                 }).wait();
             } catch (const std::exception& e) {
@@ -659,30 +667,6 @@ int main(int argc, char **argv) {
         handle = pcap_open_live(cap_conf->device, cap_conf->snaplen, 0, 1000, errbuf);
         if (!handle) {
             std::cerr << "pcap_open_live(): " << errbuf << std::endl;
-            return 1;
-        }
-        handle = pcap_create(cap_conf->device, errbuf);
-        if (!handle) {
-            std::cerr << "pcap_create(): " << errbuf << std::endl;
-            return 1;
-        }
-
-        // 设置缓冲区大小
-        if (pcap_set_buffer_size(handle, BUFFER_SIZE) != 0) {
-            std::cerr << "pcap_set_buffer_size(): " << pcap_geterr(handle) << std::endl;
-            pcap_close(handle);
-            return 1;
-        }
-
-        if (pcap_set_snaplen(handle, cap_conf->snaplen) != 0) {
-            std::cerr << "pcap_set_snaplen(): " << pcap_geterr(handle) << std::endl;
-            pcap_close(handle);
-            return 1;
-        }
-
-        if (pcap_activate(handle) != 0) {
-            std::cerr << "pcap_activate(): " << pcap_geterr(handle) << std::endl;
-            pcap_close(handle);
             return 1;
         }
 
