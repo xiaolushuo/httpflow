@@ -23,7 +23,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-#define HTTPFLOW_VERSION "0.1.1"
+#define HTTPFLOW_VERSION "0.1.3"
 
 #define MAXIMUM_SNAPLEN 262144
 #define ETHERTYPE_VLAN 0x8100  // VLAN标签的类型值
